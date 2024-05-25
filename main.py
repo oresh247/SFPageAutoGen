@@ -45,7 +45,7 @@ def get_release_tasks(release):
     return json.loads(response.text)
 
 
-def generate_release_html(grouped_df):
+def generate_release_html(tasks_df):
     # Генерируем HTML-код
     html_code = tasks_df.to_html(index=False)
 
@@ -57,6 +57,8 @@ def generate_release_html(grouped_df):
     decoded_html = str.replace(decoded_html, "'", '"')
     decoded_html = str.replace(decoded_html, 'class=sfera-link sfera-task sfera-link-style',
                                'class="sfera-link sfera-task sfera-link-style"')
+    decoded_html = str.replace(decoded_html, '<table border=1 class=dataframe>',
+                               '<table class="MsoNormalTable" border="1" cellspacing="0" cellpadding="0" width="1440" data-widthmode="wide" data-lastwidth="1761px" style="border-collapse: collapse; width: 1761px;" data-rtc-uid="67d29bf0-31c7-4de5-909d-8cea7a11f75f" id="mce_2">')
     return decoded_html
 
 
@@ -134,29 +136,47 @@ def create_df(component_lst, task_directLink_lst, prod_version_lst, new_version)
     return tasks_df
 
 
+def generating_release_page(parent_page, release, new_version, for_publication_flg):
+    # Загружаем версии ПРОДа
+    prod = get_prod_versions('data/prod.csv')
+
+    # загружаем задачи релиза
+    tasks = get_release_tasks(release)
+
+    # Обрабатываем запрос, проходя по всем задачам и формируя списки
+    component_lst, task_directLink_lst, prod_version_lst, task_lst = formation_of_lists(tasks, release, prod)
+
+    # Создаем dataframe
+    tasks_df = create_df(component_lst, task_directLink_lst, prod_version_lst, new_version)
+
+    # Формируем HTML таблицу
+    html = generate_release_html(tasks_df)
+
+    # Публикуем страницу
+    if for_publication_flg:
+        publication_release_html(html, parent_page, release)
+    return task_lst
+
+
+def add_task_to_story(task_list,story):
+    for task in task_list:
+        data = {
+        "entityNumber": story,
+        "relatedEntityNumber": task,
+        "relationType": "associatedbugsandstories"
+        }
+        response = session.post(sferaUrlRelations, json=data, verify=False)
+        if response.ok != True:
+            raise Exception("Error creating story " + response)
+
+
 # Генерация страницы ЗНИ с QL выборками
 # Задаем константы
-parent_page = '426943'
+parent_page = '1257623'
 release = 'OKR_20240623_ATM' # Метка релиза
-service = 'skmb-pledge-adapter' # Метка сервиса
 new_version = '2402.5.0' # Текущая версия сервиса
-story = ''
+story = 'SKOKR-6107'
+for_publication_flg = True # Если True - то публикуем, если False, только возврат списка задач
 
-# Загружаем версии ПРОДа
-prod = get_prod_versions('data/prod.csv')
-
-# загружаем задачи релиза
-tasks = get_release_tasks(release)
-
-# Обрабатываем запрос, проходя по всем задачам и формируя списки
-component_lst, task_directLink_lst, prod_version_lst, task_lst = formation_of_lists(tasks, release, prod)
-
-# Создаем dataframe
-tasks_df = create_df(component_lst, task_directLink_lst, prod_version_lst, new_version)
-
-# Формируем HTML таблицу
-html = generate_release_html(tasks_df)
-
-# Публикуем страницу
-result = publication_release_html(html, parent_page, release)
-print(result)
+task_lst = generating_release_page(parent_page, release, new_version, for_publication_flg)
+add_task_to_story(task_lst, story)
