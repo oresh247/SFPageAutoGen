@@ -31,19 +31,8 @@ sferaUrlKnowledge = config["SFERA"]["sferaUrlKnowledge"]
 sferaUrlKnowledge2 = config["SFERA"]["sferaUrlKnowledge2"]
 sferaUrlRelations = config["SFERA"]["sferaUrlRelations"]
 
-# session = requests.Session()
-# session.auth = (config["USER"]["user"], config["USER"]["password"])
 session = requests.Session()
 session.post(sferaUrlLogin, json={"username": devUser, "password": devPassword}, verify=False)
-
-
-def release_page_gen(parentPage, release, page_name):
-    tasks = get_release_tasks(release)
-    df = create_release_task_df(tasks)
-    grouped_df = create_release_df(df)
-    html = generate_release_html(grouped_df)
-    publication_release_html(html, parentPage, page_name)
-
 
 def get_release_tasks(release):
     # Формируем запрос
@@ -54,43 +43,6 @@ def get_release_tasks(release):
     if response.ok != True:
         raise Exception("Error get sprint data " + response)
     return json.loads(response.text)
-
-
-def create_release_task_df(tasks):
-    # Обрабатываем запрос, проходя по всем задачам и формируя списки
-    component_lst = []
-    task_directLink_lst = []
-
-
-    for task in tasks['content']:
-        for component in task['component']:
-            component_lst.append(component['name'])
-            # task_directLink_lst.append(task['directLink'])
-            task_number = task['number']
-            task_name = task['name']
-            template = f"""
-    <p><a target=_blank href=https://sfera.inno.local/tasks/task/{task_number} contenteditable=false class=sfera-link sfera-task sfera-link-style style=text-decoration: none; data-rtc-uid=40340632-c702-45bb-a461-93fdd7f681ef rel=noopener data-mce-href=https://sfera.inno.local/tasks/task/{task_number} data-mce-contenteditable=false>{task_number} {task_name}<span>&nbsp;</span>Выполнено<button class=sfera-status-button sfera-status-done>Выполнено</button></a></p>
-    """
-            task_directLink_lst.append(template)
-
-    tasks_df = pd.DataFrame({
-        'Сервис': component_lst,
-        'Задачи в сфере': task_directLink_lst
-
-    })
-    return tasks_df
-
-
-def create_release_df(df):
-    grouped_df = df.groupby('Сервис').agg(lambda x: ', '.join(map(str, x)))
-    grouped_df['Требует выкатку связанный сервис'] = ''
-    grouped_df['Версия поставки Новый цод'] = ''
-    grouped_df['Версия еДТО'] = ''
-    grouped_df['Версия для откатки'] = ''
-    grouped_df['Тест-кейсы'] = ''
-    grouped_df['БЛОК'] = ''
-    grouped_df['Комментарии'] = ''
-    return grouped_df
 
 
 def generate_release_html(grouped_df):
@@ -180,12 +132,6 @@ def create_df(component_lst, task_directLink_lst, prod_version_lst, new_version)
         'Комментарии': ''
     })
     return tasks_df
-
-
-# # Генерация страницы ЗНИ
-# parent_page = '426943'
-# release = 'OKR_20240623_ATM'
-# release_page_gen(parent_page, release, release)
 
 
 # Генерация страницы ЗНИ с QL выборками
