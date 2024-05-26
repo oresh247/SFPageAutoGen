@@ -6,6 +6,7 @@ import warnings
 import pandas as pd
 import re
 import html
+from bs4 import BeautifulSoup
 
 
 from requests.auth import HTTPBasicAuth
