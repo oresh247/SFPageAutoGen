@@ -146,16 +146,17 @@ def formation_of_lists(tasks, release, prod):
 
         if 'label' in task:
             for label in task['label']:
-                if label['name'] == 'ОКР_изменение_инвентари':
+                if label['name'] == 'ОКР_изменение_инвентори':
                     comments = get_task_comments(new_task)
                     if 'content' in comments:
+                        text = 'Изменение инвентори:'
                         for comment in comments['content']:
                             if '#Инвентори' in comment['text']:
-                                text = comment['text']
-                                text = text.replace('\n','<br>')
-                                inventory_changed_lst.append(text)
-                            else:
-                                inventory_changed_lst.append('Изменение инвентари: Добавить комментарий к задаче с меткой #Инвентори')
+                                text = text + '<br>' + comment['text']
+                                text = text.replace('#Инвентори', '')
+                                text = text.replace('\n', '<br>')
+                        inventory_changed_lst.append(text)
+
 
 
     return component_lst, task_directLink_lst, prod_version_lst, task_lst, inventory_changed_lst
