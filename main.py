@@ -32,6 +32,7 @@ sferaUrlKnowledge = config["SFERA"]["sferaUrlKnowledge"]
 sferaUrlKnowledge2 = config["SFERA"]["sferaUrlKnowledge2"]
 sferaUrlRelations = config["SFERA"]["sferaUrlRelations"]
 sferaUrlEntityViews = config["SFERA"]["sferaUrlEntityViews"]
+sferaUrlSkmbRepos = config["SFERA"]["sferaUrlSkmbRepos"]
 
 
 session = requests.Session()
@@ -105,17 +106,36 @@ def get_prod_versions(file_path):
     prod.drop(columns=['data'], inplace=True)
     return prod
 
+def get_file_edto_name(file_path):
+    file_names = pd.read_csv(file_path, header=None, names=['data'])
 
-def formation_of_lists(tasks, release, prod):
+    def get_service(value):
+        lst = str.split(value, ' ')
+        return lst[0]
+
+    def get_file_names(value):
+        lst = str.split(value, ' ')
+        return lst[-1]
+
+    file_names['service'] = file_names['data'].map(get_service)
+    file_names['file_name'] = file_names['data'].map(get_file_names)
+    file_names.drop(columns=['data'], inplace=True)
+    return file_names
+
+def formation_of_lists(tasks, release, prod, edto_file_names):
     component_lst = []
     task_directLink_lst = []
     prod_version_lst = []
     task_lst = []
     inventory_changed_lst = []
+    edto_lst = []
+
+
 
     counter = 10 # Начальный счетчик макросов на странице
     for task in tasks['content']:
         new_task = task['number']
+        service_build = ''
         if new_task not in task_lst:
             task_lst.append(new_task)
 
@@ -144,25 +164,64 @@ def formation_of_lists(tasks, release, prod):
         else:
             print("Нет компоненты: ",task['number'])
 
-        if 'label' in task:
-            for label in task['label']:
-                if label['name'] == 'ОКР_изменение_инвентори':
-                    comments = get_task_comments(new_task)
-                    if 'content' in comments:
-                        text = 'Изменение инвентори:'
-                        for comment in comments['content']:
-                            if '#Инвентори' in comment['text']:
-                                text = text + '<br>' + comment['text']
-                                text = text.replace('#Инвентори', '')
-                                text = text.replace('\n', '<br>')
-                        inventory_changed_lst.append(text)
+        # if 'label' in task:
+        #     for label in task['label']:
+        #         if label['name'] == 'ОКР_изменение_инвентори':
+        comments = get_task_comments(new_task)
+        if 'content' in comments:
+            text = ''
+            for comment in comments['content']:
+                comment_text = comment['text']
+                if '#Инвентори' in comment_text:
+                    text = text + '<br>' + comment_text
+                    text = text.replace('#Инвентори', '')
+                    text = text.replace('\n', '<br>')
+                if service_build == '':
+                    if '#build' in comment_text:
+                        service_build = str.split(comment_text)[-1]
+
+            if text == '':
+                inventory_changed_lst.append('')
+            else:
+                inventory_changed_lst.append('Изменение инвентори:\n' + text)
+
+        if service_build != '':
+            service_edto_version = get_edto_version(component_name, service_build, edto_file_names)
+            edto_lst.append(service_edto_version)
+        else:
+            edto_lst.append('')
+
+    return component_lst, task_directLink_lst, prod_version_lst, task_lst, inventory_changed_lst, edto_lst
 
 
+def find_dto_version(text):
+    # Используем регулярное выражение для поиска строки с dto_exchange_version
+    pattern = r'reactive_dto_version\s*=\s*(\S+)'
+    match = re.search(pattern, text)
+    if match:
+        return match.group(1)  # Возвращаем версию
+    return ''  # Если не найдено
 
-    return component_lst, task_directLink_lst, prod_version_lst, task_lst, inventory_changed_lst
+def get_edto_version(component_name, service_build, edto_file_names):
+    path = '/file/raw/'
+    #file_name = 'gradle.properties'
 
+    matching_rows = edto_file_names[edto_file_names['service'].str.contains(component_name)]
+    if not matching_rows.empty:
+        file_name = matching_rows['file_name'].values[0]
+    else:
+        file_name = 'gradle.properties'
 
-def create_df(component_lst, task_directLink_lst, prod_version_lst, new_version, inventory_changed_lst):
+    query = '?rev=' + service_build
+    url = sferaUrlSkmbRepos + component_name + path + file_name + query
+    # Делаем запрос задач по фильтру
+    response = session.get(url, verify=False)
+    if response.ok != True:
+        #raise Exception("Error get sprint data " + response)
+        return ''
+    return find_dto_version(response.text)
+
+def create_df(component_lst, task_directLink_lst, prod_version_lst, new_version, inventory_changed_lst, edto_lst):
     # Проверка на пустоту списка inventory_changed_lst
     if not inventory_changed_lst:
         inventory_changed_lst = [''] * len(component_lst)  # Заполнение пустыми строками, если список пустой
@@ -173,7 +232,7 @@ def create_df(component_lst, task_directLink_lst, prod_version_lst, new_version,
         'Версия поставки Новый цод': new_version,
         'Версия для откатки': prod_version_lst,
         'Требует выкатку связанный сервис': '',
-        'Версия еДТО': '',
+        'Версия еДТО': edto_lst,
         'Тест-кейсы': '',
         'БЛОК': '',
         'Изменение инвентари': inventory_changed_lst,
@@ -186,14 +245,20 @@ def generating_release_page(parent_page, release, new_version, for_publication_f
     # Загружаем версии ПРОДа
     prod = get_prod_versions('data/prod.csv')
 
+    # Загружаем имена файлов
+    edto_file_names = get_file_edto_name('data/file_for_edto.csv')
+
     # загружаем задачи релиза
     tasks = get_release_tasks(release)
 
     # Обрабатываем запрос, проходя по всем задачам и формируя списки
-    component_lst, task_directLink_lst, prod_version_lst, task_lst, inventory_changed_lst = formation_of_lists(tasks, release, prod)
+    component_lst, task_directLink_lst, prod_version_lst, task_lst, inventory_changed_lst, edto_lst = formation_of_lists(tasks, release, prod, edto_file_names)
+
+    # Получаем версию еДТО
+
 
     # Создаем dataframe
-    tasks_df = create_df(component_lst, task_directLink_lst, prod_version_lst, new_version, inventory_changed_lst)
+    tasks_df = create_df(component_lst, task_directLink_lst, prod_version_lst, new_version, inventory_changed_lst, edto_lst)
 
     # Формируем HTML таблицу
     html = generate_release_html(tasks_df)
@@ -309,7 +374,7 @@ def createSferaTask(release):
 # Генерация страницы ЗНИ с QL выборками
 # Задаем константы
 parent_page = '1295831'
-release = 'OKR_20240825_IR' # Метка релиза
+release = 'OKR_20240908_IR' # Метка релиза
 new_version = '2403.6.0' # Текущая версия сервиса
 story = 'SKOKR-6384'
 for_publication_flg = True # Если True - то публикуем, если False, только возврат списка задач
